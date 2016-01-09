@@ -30,7 +30,7 @@ Additionally, `openvpn.exe` has to be in your `%PATH%`. A Cygwin-specific distri
 
 1. Create `login.conf` in the `pia` folder, with the first line being your username, and the second being the password.
 2. Fill the `domains.txt` file with the list of domains you would like to split-tunnel inclusively.
-3. Run `gen_addrs.sh` in order to generate `addrs_v4.txt` and `addrs_v6.txt` from `domains.txt`.
+3. Run `gen_addrs.sh` in order to generate `addrs_v4.txt` and `addrs_v6.txt` from `domains.txt` **OR** manually create `addrs_v4.txt` and `addrs_v6.txt` with IPv4 CIDR notations of the netblocks you want to route selectively, and IPv6 netblocks you want to null-route.
 4. Edit `add_routes.sh` and replace `Ethernet adapter Intel` with the name of your actual LAN adapter, as seen in `ipconfig`.
 5. Run `add_routes.sh us` (or any file name as the parameter from the `pia` folder) to start the VPN and add the routes.
 6. When finished, run `del_routes.sh` to stop the VPN and remove the routes. If not run, the routes will clear on the next Windows restart anyways, since they are intentionally not set as persistent.
