@@ -27,11 +27,13 @@ echo -n > addrs_v4_tmp.txt
 echo -n > addrs_v6_tmp.txt
 
 while read addr; do
-	whois "$addr" | awk '/^(CIDR|route):/&&/\//{print $2}' | tr -d ', ' >> addrs_v4_tmp.txt
+	res=$(whois "$addr")
+	echo "$res" | awk 'tolower($0)~/^(cidr|route):/&&/\//{print $2}' | tr -d ', ' >> addrs_v4_tmp.txt
+	echo "$res" | awk 'tolower($0)~/^(inetnum|netrange):/&&/\-/{print $2"-"$4}' | tr -d ', ' | xargs -n 1 ipcalc -r | awk '$1~/\//{print $1}' >> addrs_v4_tmp.txt
 done <addrs_v4.txt
 
 while read addr; do
-	whois "$addr" | awk '/^inet6num:/&&/\//{print $2}' | tr -d ', ' >> addrs_v6_tmp.txt
+	whois "$addr" | awk 'tolower($0)~/^inet6num:/&&/\//{print $2}' | tr -d ', ' >> addrs_v6_tmp.txt
 done <addrs_v6.txt
 
 cat addrs_v4_tmp.txt > addrs_v4.txt
