@@ -52,7 +52,7 @@ echo Adding IPv4 addresses...
 
 while read cidr; do
 	echo "Routing $cidr to $vpn4..."
-	route add "$cidr/32" "$vpn4"
+	route add "$cidr" "$vpn4"
 done <addrs_v4.txt
 
 # set-up IPv6 addresses to null-route
@@ -61,5 +61,5 @@ echo Adding IPv6 addresses...
 
 while read cidr; do
 	echo "Routing $cidr to $gwv6..."
-	route add "$cidr/128" "$gwv6" if 1
+	route add "$cidr" "$gwv6" if 1
 done <addrs_v6.txt

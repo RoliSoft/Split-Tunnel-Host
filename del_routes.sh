@@ -17,7 +17,7 @@ fi
 echo Removing IPv4 addresses...
 
 while read cidr; do
-	route delete "$cidr/32"
+	route delete "$cidr"
 done <addrs_v4.txt
 
 # remove IPv6 address null-routes
@@ -25,5 +25,5 @@ done <addrs_v4.txt
 echo Removing IPv6 addresses...
 
 while read cidr; do
-	route delete "$cidr/128"
+	route delete "$cidr"
 done <addrs_v6.txt

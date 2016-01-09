@@ -18,3 +18,16 @@ echo Deduplicating list...
 
 { rm addrs_v4.txt && sort -n | uniq > addrs_v4.txt; } < addrs_v4.txt
 { rm addrs_v6.txt && sort -n | uniq > addrs_v6.txt; } < addrs_v6.txt
+
+# transfrom address list into a CIDR list
+# this is problematic, normally you would do a whois for the IP and use the returned range,
+# but in most cases this would return a CIDR which covers all the servers in use by the
+# cloud provider, and this might not be what we want
+# the current implementation just uses /24 for IPv4 and /64 for IPv6
+
+echo Processing list...
+
+{ rm addrs_v4.txt && awk -F'.' '{print $1"."$2"."$3".0/24"}' > addrs_v4.txt; } < addrs_v4.txt
+{ rm addrs_v6.txt && awk -F'.' '{print $0"/64"}' > addrs_v6.txt; } < addrs_v6.txt
+
+echo "94.125.179.8/32" >> addrs_v4.txt
