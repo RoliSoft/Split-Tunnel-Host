@@ -1,14 +1,17 @@
 #!/bin/bash
 
+if [ $(uname -m) == "x86_64" ]; then
+	SendCtrlC="./SendCtrlC64"
+else
+	SendCtrlC="./SendCtrlC"
+fi
+
 # stop our OpenVPN instance, if running
 
 if [[ -f openvpn_pid.txt ]]; then
 	echo Stopping OpenVPN...
 	
-	/bin/kill -s INT -f $(cat openvpn_pid.txt | tr -d '\r\n ') 2>&1 1>/dev/null
-	if [ $? -ne 0 ]; then
-		echo Failed to stop OpenVPN on PID $(cat openvpn_pid.txt)
-	fi
+	$SendCtrlC $(cat openvpn_pid.txt | tr -d '\r\n ')
 	rm -f openvpn_pid.txt
 fi
 

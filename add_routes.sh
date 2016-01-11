@@ -11,8 +11,9 @@ fi
 # start OpenVPN
 
 echo Starting OpenVPN...
+
 rm -f openvpn_out.txt
-( cd pia; openvpn --writepid ../openvpn_pid.txt --config "$1.ovpn" 2>&1 1>../openvpn_out.txt )&
+( cd pia; openvpn --writepid ../openvpn_pid.txt --config "$1.ovpn" > ../openvpn_out.txt 2>&1 )&
 
 # extract "DHCP-serv" IP from log
 # warning: this may be PIA-specific
