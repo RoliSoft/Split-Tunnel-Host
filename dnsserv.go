@@ -20,10 +20,18 @@ var gateway *string
 var router string
 var routed []string
 
-func getErrMsg(w dns.ResponseWriter, req *dns.Msg, err int) *dns.Msg {
+func getErrorMsg(w dns.ResponseWriter, req *dns.Msg, err int) *dns.Msg {
 	m := new(dns.Msg)
 	m.SetReply(req)
 	m.SetRcode(req, err)
+	m.Authoritative = false
+	m.RecursionAvailable = true
+	return m
+}
+
+func getEmptyMsg(w dns.ResponseWriter, req *dns.Msg) *dns.Msg {
+	m := new(dns.Msg)
+	m.SetReply(req)
 	m.Authoritative = false
 	m.RecursionAvailable = true
 	return m
@@ -52,7 +60,7 @@ func getNsReply(w dns.ResponseWriter, req *dns.Msg) *dns.Msg {
 	}
 
 	log.Print("Failed to forward request.", err)
-	return getErrMsg(w, req, dns.RcodeServerFailure)
+	return getErrorMsg(w, req, dns.RcodeServerFailure)
 }
 
 func handleRequest(w dns.ResponseWriter, req *dns.Msg) {
@@ -83,7 +91,7 @@ func handleRequest(w dns.ResponseWriter, req *dns.Msg) {
 			if *verbose {
 				log.Print("Hijacking ", req.Question[0].Name, "/", dns.Type(req.Question[0].Qtype).String())
 			}
-			m = getErrMsg(w, req, dns.RcodeNameError)
+			m = getEmptyMsg(w, req)
 		} else {
 			m = getNsReply(w, req)
 		}
