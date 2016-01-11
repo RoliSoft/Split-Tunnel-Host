@@ -6,7 +6,7 @@ The purpose of this project is to mess with the Windows routing table in order t
 
 This method makes a DNS request for each listed domain and then looks up the netblocks the IP belong to via whois. These netblocks are then routed through the VPN in case of IPv4, and null-routed in case of IPv6. This works, but comes with some side-effects, such as routing irrelevant services on the same netblock via the VPN or failure to compile an exhaustive list of netblocks due to heavy DNS load-balancing. For more information, see [Side Effects](#side-effects).
 
-See the second method for split-tunneling services such as Netflix without side-effects.
+See the [second method](#method-2----dynamic-per-ip-routing) for split-tunneling services such as Netflix without side-effects.
 
 ## Implementation
 
@@ -43,7 +43,7 @@ Additionally, `openvpn.exe` has to be in your `%PATH%`. A Cygwin-specific distri
 
 # Method 2 -- Dynamic Per-IP Routing
 
-This method is a more active approach. It implements a DNS server in _Go_ which handles specified domains and forwards irrelevant requests to the default nameservers. When a request of type `A` is seen for the specified domain or any of its subdomain, all of the IP addresses in the reply are added to the routing table. For requests of type `AAAA` and the specified domain, an empty response is sent back. The routed addresses are automatically removed upon stopping the DNS server.
+This method is a more active approach. It implements a DNS server in _Go_ which handles specified domains and forwards irrelevant requests to the default nameservers. When a request of type `A` is seen for the specified domain or any of its subdomains, all of the IP addresses in the reply are added to the routing table. For requests of type `AAAA` and the specified domain, an empty response is sent back. The routed addresses are automatically removed upon stopping the DNS server.
 
 ## Implementation
 
