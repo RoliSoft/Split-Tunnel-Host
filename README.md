@@ -43,7 +43,7 @@ Additionally, `openvpn.exe` has to be in your `%PATH%`. A Cygwin-specific distri
 
 # Method 2 -- Dynamic Per-IP Routing
 
-This method is a more active approach. It implements a DNS server in _Go_ which handles specified domains and forwards irrelevant requests to the default nameservers. When a request of type `A` is seen for the specified domain or any of its subdomains, all of the IP addresses in the reply are added to the routing table. For requests of type `AAAA` and the specified domain, an empty response is sent back. The routed addresses are automatically removed upon stopping the DNS server.
+This method is a more active approach. It implements a DNS server in _Go_ which handles specified domains and forwards irrelevant requests to the default nameservers. When a request of type `A` is seen for the specified domain or any of its subdomains, all of the IP addresses in the reply are added to the routing table. For requests of type `AAAA` and the specified domain, an empty response is sent back, unless tunneling is requested, in which case they will get the same treatment as the records of type `A`. The routed addresses are automatically removed upon stopping the DNS server.
 
 ## Implementation
 
@@ -51,7 +51,7 @@ The `run_dnsserv.sh` script starts OpenVPN with the specified configuration, wai
 
 The `kill_dnsserv.sh` script stops the running OpenVPN and DNS server instances, if there are any, switches the DNS back to DHCP for the specified network adapter and flushes DNS cache. Since a pid-file is used, this script will only stop the instance specifically started by `run_dnsserv.sh`, and not do `killall openvpn; killall dnsserv`, so it is safe to use with multiple active VPN connections.
 
-The `dnsserv.go` file is the DNS server itself. It uses the [miekg/dns](http://github.com/miekg/dns) DNS library both to act as a server and a client for forwarding. The `handleRequest()` function decides the path to take for every DNS request, this is what you'll have to modify with the domains you want to split-tunnel dynamically. For requests of type `A`, every IP in the response will be added to the routing table to use the gateway IP specified in parameter `-r`. This is automatically specified when started by the `run_dnsserv.sh` script. For requests of type `AAAA`, an empty response will be sent back. (Initially this was an `NXDOMAIN`, but Chrome would then just show an error message stating `DNS_PROBE_FINISHED_NXDOMAIN`, even though it sends an `A` request which is then answered properly.) For domains not looked after in the function, the requests will be proxied to the actual nameservers and back without any tampering.
+The `dnsserv.go` file is the DNS server itself. It uses the [miekg/dns](http://github.com/miekg/dns) DNS library both to act as a server and a client for forwarding. The `handleRequest()` function decides the path to take for every DNS request, this is what you'll have to modify with the domains you want to split-tunnel dynamically. For requests of type `A`, every IP in the response will be added to the routing table to use the gateway IP specified in command line argument `-r`. This is automatically specified when started by the `run_dnsserv.sh` script. For requests of type `AAAA`, an empty response will be sent back, unless an IPv6 gateway address is specified via the argument `-r6`, in which case they will get the same treatment as records of type `A`. (Initially IPv6 hijacking was done with an `NXDOMAIN` error in the reply, but Chrome would then just show an error message stating `DNS_PROBE_FINISHED_NXDOMAIN`, even though it sent an `A` request which was then answered properly.) For domains not looked after in the function, the requests will be proxied to the actual nameservers and back without any tampering.
 
 The `SendCtrlC.exe` and `SendCtrlC64.exe` are used to gracefully end both the DNS server and OpenVPN by sending a Ctrl+C message to the processes. Windows does not implement signaling the way Linux does, so even though both apps handle `SIGINT`/Ctrl+C, `taskkill /im` or `/bin/kill -s INT -f` (in Cygwin) do not shut the processes down in a way which would trigger their signal handler. These binaries were compiled from a modified source of the [SendSignal](http://www.latenighthacking.com/projects/2003/sendsignal/) project, which originally sends a Ctrl+Break signal.
 
@@ -65,7 +65,7 @@ Additionally, `go.exe` and `openvpn.exe` have to be in your `%PATH%`. The standa
 
 1. Create `login.conf` in the `pia` folder, with the first line being your username, and the second being the password.
 2. Edit `run_dnsserv.sh` and `kill_dnsserv.sh` and replace the adapter name to yours in the `netsh` calls.
-3. Edit `dnsserv.go` and update as needed the nameservers in `main()` or the filtered domain names in `handleRequest()`.
+3. Edit `dnsserv.go` and update the filtering logic in `isTargetZone()` as needed.
 4. Fetch the dependencies and build the DNS server:
 
         go get github.com/miekg/dns
