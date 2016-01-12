@@ -5,6 +5,7 @@ import (
 	"net"
 	"time"
 	"flag"
+	"path"
 	"strings"
 	"os"
 	"os/exec"
@@ -20,8 +21,22 @@ var gateway4 *string
 var gateway6 *string
 var routev6 bool
 var router string
-var routedv4 []string
-var routedv6 []string
+var routedv4 map[string]struct{}
+var routedv6 map[string]struct{}
+
+func runAndLog(name string, arg ...string) {
+	out, err := exec.Command(name, arg...).CombinedOutput()
+
+	if err != nil {
+		if len(out) > 1 {
+			log.Printf("%s: %s", path.Base(strings.Replace(name, "\\", "/", -1)), out)
+		} else {
+			log.Print(err)
+		}
+	} else if *verbose {
+		log.Printf("%s: %s", path.Base(strings.Replace(name, "\\", "/", -1)), out)
+	}
+}
 
 func getEmptyMsg(w dns.ResponseWriter, req *dns.Msg, err int) *dns.Msg {
 	m := new(dns.Msg)
@@ -38,7 +53,7 @@ func getEmptyMsg(w dns.ResponseWriter, req *dns.Msg, err int) *dns.Msg {
 	return m
 }
 
-func getNsReply(w dns.ResponseWriter, req *dns.Msg) *dns.Msg {
+func getServerReply(w dns.ResponseWriter, req *dns.Msg) *dns.Msg {
 	if *verbose {
 		log.Print("Forwarding ", req.Question[0].Name, "/", dns.Type(req.Question[0].Qtype).String())
 	}
@@ -69,20 +84,15 @@ func handleRequest(w dns.ResponseWriter, req *dns.Msg) {
 
 	if len(req.Question) > 0 && (req.Question[0].Name == "netflix.com." || strings.HasSuffix(req.Question[0].Name, ".netflix.com.")) {
 		if req.Question[0].Qtype == dns.TypeA {
-			m = getNsReply(w, req)
+			m = getServerReply(w, req)
 			for _, ans := range m.Answer {
 				if ans.Header().Rrtype == dns.TypeA {
 					ip := ans.(*dns.A).A.String()
-					routedv4 = append(routedv4, ip)
+					routedv4[ip] = struct{}{}
 
 					log.Print("Re-routing ", ip, " for ", ans.Header().Name, "/", dns.Type(ans.Header().Rrtype).String())
 
-					out, err := exec.Command(router, "add", ip + "/32", *gateway4).CombinedOutput()
-					if err != nil {
-						log.Print(err)
-					} else if *verbose {
-						log.Printf("route: %s", out)
-					}
+					runAndLog(router, "add", ip + "/32", *gateway4)
 				} else if ans.Header().Rrtype == dns.TypeAAAA {
 					// sanity check for now, shouldn't happen afaik
 					log.Print("WARNING: AAAA response in ", ans.Header().Name, "/A")
@@ -90,20 +100,15 @@ func handleRequest(w dns.ResponseWriter, req *dns.Msg) {
 			}
 		} else if req.Question[0].Qtype == dns.TypeAAAA {
 			if routev6 {
-				m = getNsReply(w, req)
+				m = getServerReply(w, req)
 				for _, ans := range m.Answer {
 					if ans.Header().Rrtype == dns.TypeAAAA {
 						ip := ans.(*dns.AAAA).AAAA.String()
-						routedv6 = append(routedv6, ip)
+						routedv6[ip] = struct{}{}
 
 						log.Print("Re-routing ", ip, " for ", ans.Header().Name, "/", dns.Type(ans.Header().Rrtype).String())
 
-						out, err := exec.Command(router, "add", ip + "/128", *gateway6).CombinedOutput()
-						if err != nil {
-							log.Print(err)
-						} else if *verbose {
-							log.Printf("route: %s", out)
-						}
+						runAndLog(router, "add", ip + "/128", *gateway6)
 					} else if ans.Header().Rrtype == dns.TypeA {
 						log.Print("WARNING: A response in ", ans.Header().Name, "/AAAA")
 					}
@@ -115,13 +120,31 @@ func handleRequest(w dns.ResponseWriter, req *dns.Msg) {
 				m = getEmptyMsg(w, req, 0)
 			}
 		} else {
-			m = getNsReply(w, req)
+			m = getServerReply(w, req)
 		}
 	} else {
-		m = getNsReply(w, req)
+		m = getServerReply(w, req)
 	}
 
 	w.WriteMsg(m)
+}
+
+func removeRoutes() {
+	if len(routedv4) > 0 {
+		log.Print("Removing routes...")
+
+		for ip, _ := range routedv4 {
+			runAndLog(router, "delete", ip + "/32")
+		}
+	}
+
+	if routev6 && len(routedv6) > 0 {
+		log.Print("Removing IPv6 routes...")
+
+		for ip, _ := range routedv6 {
+			runAndLog(router, "delete", ip + "/128")
+		}
+	}
 }
 
 func main() {
@@ -160,6 +183,12 @@ func main() {
 		routev6 = false
 	}
 
+	routedv4 = make(map[string]struct{})
+
+	if (routev6) {
+		routedv6 = make(map[string]struct{})
+	}
+
 	log.Print("Starting DNS resolver...")
 
 	nameservers = []string{"8.8.8.8:53", "8.8.4.4:53"}
@@ -190,32 +219,7 @@ func main() {
 	for {
 		select {
 		case s := <-sig:
-			if len(routedv4) > 0 {
-				log.Print("Removing routes...")
-
-				for _, ip := range routedv4 {
-					out, err := exec.Command(router, "delete", ip + "/32").CombinedOutput()
-					if err != nil {
-						log.Print(err)
-					} else if *verbose {
-						log.Printf("route: %s", out)
-					}
-				}
-			}
-
-			if routev6 && len(routedv6) > 0 {
-				log.Print("Removing IPv6 routes...")
-
-				for _, ip := range routedv6 {
-					out, err := exec.Command(router, "delete", ip + "/128").CombinedOutput()
-					if err != nil {
-						log.Print(err)
-					} else if *verbose {
-						log.Printf("route: %s", out)
-					}
-				}
-			}
-
+			removeRoutes()
 			log.Fatalf("Received signal %d, exiting...", s)
 		}
 	}
