@@ -15,15 +15,24 @@ import (
 	"github.com/miekg/dns"
 )
 
-var nameservers []string
-var verbose *bool
-var gateway4 *string
-var gateway6 *string
-var routev6 bool
-var router string
-var routedv4 map[string]struct{}
-var routedv6 map[string]struct{}
+var (
+	nameservers []string
+	verbose     *bool
+	gateway4    *string
+	gateway6    *string
+	dnsr1       *string
+	dnsr2       *string
+	routev6     bool
+	router      string
+	routedv4    map[string]struct{}
+	routedv6    map[string]struct{}
+)
 
+// Executes the specified command with the specified arguments. The
+// `name` parameter should be an absolute path to the executable.
+// See `exec.LookPath()` for resolving names found in `%PATH%`.
+// Any errors will be logged to stdout, if an output is available,
+// otherwise the return code or internal Go error will be displayed.
 func runAndLog(name string, arg ...string) {
 	out, err := exec.Command(name, arg...).CombinedOutput()
 
@@ -38,6 +47,18 @@ func runAndLog(name string, arg ...string) {
 	}
 }
 
+// Creates an empty response to the specified request. If `err` is
+// specified, the `RCODE` field in the response will be set to this value.
+// If `err` is set to 0, the `RCODE` field will not be modified, and the
+// resulting packet will just mean that the domain exists (not `NXDOMAIN`)
+// but there are no records of the requested type associated to it.
+// If `NXDOMAIN` is sent as a reply to the hijacked `AAAA` records of hostnames
+// when IPv6 routing is disabled, some web browsers (e.g. Chrome) will display
+// an error message stating `DNS_PROBE_FINISHED_NXDOMAIN`, even though a request
+// for `A` records types is sent and properly replied to by the server to the client.
+// Even though the original `ResponseWriter` object is taken as an argument,
+// this function does not send a reply to the client. Instead, the
+// packet is returned for further processing by the caller.
 func getEmptyMsg(w dns.ResponseWriter, req *dns.Msg, err int) *dns.Msg {
 	m := new(dns.Msg)
 
@@ -53,10 +74,18 @@ func getEmptyMsg(w dns.ResponseWriter, req *dns.Msg, err int) *dns.Msg {
 	return m
 }
 
+// Forwards a DNS request to the specified nameservers. On success, the
+// original reply packet will be returned to the caller. On failure, a
+// new packet will be returned with `RCODE` set to `SERVFAIL`.
+// Even though the original `ResponseWriter` object is taken as an argument,
+// this function does not send a reply to the client. Instead, the
+// packet is returned for further processing by the caller.
 func getServerReply(w dns.ResponseWriter, req *dns.Msg) *dns.Msg {
 	if *verbose {
 		log.Print("Forwarding ", req.Question[0].Name, "/", dns.Type(req.Question[0].Qtype).String())
 	}
+
+	// create new DNS client
 
 	client := &dns.Client{Net: "udp", ReadTimeout: 4 * time.Second, WriteTimeout: 4 * time.Second, SingleInflight: true}
 
@@ -67,10 +96,17 @@ func getServerReply(w dns.ResponseWriter, req *dns.Msg) *dns.Msg {
 	var r *dns.Msg
 	var err error
 
+	// loop through the specified nameservers and forward them the request
+
+	// the request ID is used as a starting point in order to introduce at least
+	// some element of randomness, instead of always hitting the first nameserver
+
 	for i := 0; i < len(nameservers); i++ {
 		r, _, err = client.Exchange(req, nameservers[(int(req.Id) + i) % len(nameservers)])
+
 		if err == nil {
 			r.Compress = true
+
 			return r
 		}
 	}
@@ -79,6 +115,12 @@ func getServerReply(w dns.ResponseWriter, req *dns.Msg) *dns.Msg {
 	return getEmptyMsg(w, req, dns.RcodeServerFailure)
 }
 
+// Handles an incoming DNS request packet. This function decides whether
+// the hostname listed in the DNS packet is worthy of manipulation, or
+// not. The IP addresses listed in the reply to the user for a marked
+// hostname are added to the routing table at this time before a
+// reply is sent back to the user, otherwise the user agent of the client
+// might connect faster than the routing changes can be made.
 func handleRequest(w dns.ResponseWriter, req *dns.Msg) {
 	var m *dns.Msg
 
@@ -129,7 +171,12 @@ func handleRequest(w dns.ResponseWriter, req *dns.Msg) {
 	w.WriteMsg(m)
 }
 
+// Removes the routed from the Windows Routing Table that have been
+// added durin the lifetime of the server. Failure to call this function
+// during exit may result in the inaccessibility of the added IP addresses.
 func removeRoutes() {
+	// remove IPv4 routes
+
 	if len(routedv4) > 0 {
 		log.Print("Removing routes...")
 
@@ -137,6 +184,8 @@ func removeRoutes() {
 			runAndLog(router, "delete", ip + "/32")
 		}
 	}
+
+	// remove IPv6 routes
 
 	if routev6 && len(routedv6) > 0 {
 		log.Print("Removing IPv6 routes...")
@@ -147,20 +196,31 @@ func removeRoutes() {
 	}
 }
 
+// Main entry point of the application. Its behaviour can be modified
+// via command line arguments as shown by the `flag` calls inside.
 func main() {
+	// set-up flags
+
 	gateway4 = flag.String("r", "", "IPv4 gateway address for routing destination")
 	gateway6 = flag.String("r6", "", "IPv6 gateway address for routing destination")
-	verbose = flag.Bool("v", false, "verbose logging")
+	dnsr1    = flag.String("dp", "8.8.8.8", "primary DNS server")
+	dnsr2    = flag.String("ds", "8.8.4.4", "secondary DNS server")
+	verbose  = flag.Bool("v", false, "verbose logging")
 
 	flag.Usage = func() {
 		flag.PrintDefaults()
 	}
+
 	flag.Parse()
+
+	// find the route utility in %PATH%
 
 	router, _ = exec.LookPath("route")
 	if len(router) < 1 {
 		log.Fatal("Unable to find the `route` command in your %PATH%.")
 	}
+
+	// read gateway from arguments
 
 	if len(*gateway4) < 1 {
 		log.Fatal("A gateway IP must be specified via argument `r`.")
@@ -171,6 +231,8 @@ func main() {
 	} else {
 		log.Fatal("Specified gateway IP is not a valid IPv4 address.")
 	}
+
+	// IPv6 gateway is optional
 
 	if len(*gateway6) > 1 {
 		if ip := net.ParseIP(*gateway6); ip != nil && ip.To4() == nil {
@@ -183,35 +245,60 @@ func main() {
 		routev6 = false
 	}
 
+	// allocate set for routed IP addresses
+
 	routedv4 = make(map[string]struct{})
 
 	if (routev6) {
 		routedv6 = make(map[string]struct{})
 	}
 
+	// read DNS servers to forward to
+
+	if ip := net.ParseIP(*dnsr1); ip != nil {
+		*dnsr1 = ip.String()
+	} else {
+		log.Fatal("Specified primary DNS server is not a valid IP address.")
+	}
+
+	if ip := net.ParseIP(*dnsr2); ip != nil {
+		*dnsr2 = ip.String()
+	} else {
+		log.Fatal("Specified secondary DNS server is not a valid IP address.")
+	}
+
+	nameservers = []string{*dnsr1 + ":53", *dnsr2 + ":53"}
+
+	// start DNS server
+
 	log.Print("Starting DNS resolver...")
-
-	nameservers = []string{"8.8.8.8:53", "8.8.4.4:53"}
-
 	log.Print("Forwarding to ", nameservers)
 
 	dns.HandleFunc(".", handleRequest)
 
+	// start local UDP listener
+
 	go func() {
 		srv := &dns.Server{Addr: ":53", Net: "udp"}
 		err := srv.ListenAndServe()
+
 		if err != nil {
 			log.Fatal("Failed to start UDP server.", err.Error())
 		}
 	}()
 
+	// start local TCP listener
+
 	go func() {
 		srv := &dns.Server{Addr: ":53", Net: "tcp"}
 		err := srv.ListenAndServe()
+
 		if err != nil {
 			log.Fatal("Failed to start TCP server.", err.Error())
 		}
 	}()
+
+	// start listening for OS signals
 
 	sig := make(chan os.Signal)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
