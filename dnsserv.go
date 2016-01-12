@@ -16,24 +16,25 @@ import (
 
 var nameservers []string
 var verbose *bool
-var gateway *string
+var gateway4 *string
+var gateway6 *string
+var routev6 bool
 var router string
-var routed []string
+var routedv4 []string
+var routedv6 []string
 
-func getErrorMsg(w dns.ResponseWriter, req *dns.Msg, err int) *dns.Msg {
+func getEmptyMsg(w dns.ResponseWriter, req *dns.Msg, err int) *dns.Msg {
 	m := new(dns.Msg)
+
 	m.SetReply(req)
-	m.SetRcode(req, err)
+
+	if err != 0 {
+		m.SetRcode(req, err)
+	}
+
 	m.Authoritative = false
 	m.RecursionAvailable = true
-	return m
-}
 
-func getEmptyMsg(w dns.ResponseWriter, req *dns.Msg) *dns.Msg {
-	m := new(dns.Msg)
-	m.SetReply(req)
-	m.Authoritative = false
-	m.RecursionAvailable = true
 	return m
 }
 
@@ -60,7 +61,7 @@ func getNsReply(w dns.ResponseWriter, req *dns.Msg) *dns.Msg {
 	}
 
 	log.Print("Failed to forward request.", err)
-	return getErrorMsg(w, req, dns.RcodeServerFailure)
+	return getEmptyMsg(w, req, dns.RcodeServerFailure)
 }
 
 func handleRequest(w dns.ResponseWriter, req *dns.Msg) {
@@ -72,11 +73,11 @@ func handleRequest(w dns.ResponseWriter, req *dns.Msg) {
 			for _, ans := range m.Answer {
 				if ans.Header().Rrtype == dns.TypeA {
 					ip := ans.(*dns.A).A.String()
-					routed = append(routed, ip)
+					routedv4 = append(routedv4, ip)
 
 					log.Print("Re-routing ", ip, " for ", ans.Header().Name, "/", dns.Type(ans.Header().Rrtype).String())
 
-					out, err := exec.Command(router, "add", ip + "/32", *gateway).CombinedOutput()
+					out, err := exec.Command(router, "add", ip + "/32", *gateway4).CombinedOutput()
 					if err != nil {
 						log.Print(err)
 					} else if *verbose {
@@ -88,10 +89,31 @@ func handleRequest(w dns.ResponseWriter, req *dns.Msg) {
 				}
 			}
 		} else if req.Question[0].Qtype == dns.TypeAAAA {
-			if *verbose {
-				log.Print("Hijacking ", req.Question[0].Name, "/", dns.Type(req.Question[0].Qtype).String())
+			if routev6 {
+				m = getNsReply(w, req)
+				for _, ans := range m.Answer {
+					if ans.Header().Rrtype == dns.TypeAAAA {
+						ip := ans.(*dns.AAAA).AAAA.String()
+						routedv6 = append(routedv6, ip)
+
+						log.Print("Re-routing ", ip, " for ", ans.Header().Name, "/", dns.Type(ans.Header().Rrtype).String())
+
+						out, err := exec.Command(router, "add", ip + "/128", *gateway6).CombinedOutput()
+						if err != nil {
+							log.Print(err)
+						} else if *verbose {
+							log.Printf("route: %s", out)
+						}
+					} else if ans.Header().Rrtype == dns.TypeA {
+						log.Print("WARNING: A response in ", ans.Header().Name, "/AAAA")
+					}
+				}
+			} else {
+				if *verbose {
+					log.Print("Hijacking ", req.Question[0].Name, "/", dns.Type(req.Question[0].Qtype).String())
+				}
+				m = getEmptyMsg(w, req, 0)
 			}
-			m = getEmptyMsg(w, req)
 		} else {
 			m = getNsReply(w, req)
 		}
@@ -103,7 +125,8 @@ func handleRequest(w dns.ResponseWriter, req *dns.Msg) {
 }
 
 func main() {
-	gateway = flag.String("r", "", "gateway IP for routing destination")
+	gateway4 = flag.String("r", "", "IPv4 gateway address for routing destination")
+	gateway6 = flag.String("r6", "", "IPv6 gateway address for routing destination")
 	verbose = flag.Bool("v", false, "verbose logging")
 
 	flag.Usage = func() {
@@ -116,8 +139,25 @@ func main() {
 		log.Fatal("Unable to find the `route` command in your %PATH%.")
 	}
 
-	if len(*gateway) < 7 {
-		log.Fatal("Gateway IP must be specified via argument `r`.")
+	if len(*gateway4) < 1 {
+		log.Fatal("A gateway IP must be specified via argument `r`.")
+	}
+
+	if ip := net.ParseIP(*gateway4); ip != nil && ip.To4() != nil {
+		*gateway4 = ip.String()
+	} else {
+		log.Fatal("Specified gateway IP is not a valid IPv4 address.")
+	}
+
+	if len(*gateway6) > 1 {
+		if ip := net.ParseIP(*gateway6); ip != nil && ip.To4() == nil {
+			*gateway6 = ip.String()
+			  routev6 = true
+		} else {
+			log.Fatal("Specified gateway IP is not a valid IPv6 address.")
+		}
+	} else {
+		routev6 = false
 	}
 
 	log.Print("Starting DNS resolver...")
@@ -146,14 +186,28 @@ func main() {
 
 	sig := make(chan os.Signal)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+
 	for {
 		select {
 		case s := <-sig:
-			if len(routed) > 0 {
+			if len(routedv4) > 0 {
 				log.Print("Removing routes...")
 
-				for _, ip := range routed {
+				for _, ip := range routedv4 {
 					out, err := exec.Command(router, "delete", ip + "/32").CombinedOutput()
+					if err != nil {
+						log.Print(err)
+					} else if *verbose {
+						log.Printf("route: %s", out)
+					}
+				}
+			}
+
+			if routev6 && len(routedv6) > 0 {
+				log.Print("Removing IPv6 routes...")
+
+				for _, ip := range routedv6 {
+					out, err := exec.Command(router, "delete", ip + "/128").CombinedOutput()
 					if err != nil {
 						log.Print(err)
 					} else if *verbose {
