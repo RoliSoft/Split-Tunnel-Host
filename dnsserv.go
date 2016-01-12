@@ -85,7 +85,7 @@ func getServerReply(w dns.ResponseWriter, req *dns.Msg) *dns.Msg {
 		log.Print("Forwarding ", req.Question[0].Name, "/", dns.Type(req.Question[0].Qtype).String())
 	}
 
-	// create new DNS client
+	// create a new DNS client
 
 	client := &dns.Client{Net: "udp", ReadTimeout: 4 * time.Second, WriteTimeout: 4 * time.Second, SingleInflight: true}
 
@@ -115,58 +115,125 @@ func getServerReply(w dns.ResponseWriter, req *dns.Msg) *dns.Msg {
 	return getEmptyMsg(w, req, dns.RcodeServerFailure)
 }
 
+// Checks whether the specified hostname is part of the zone which
+// is set to be hijacked or whose IP addresses require split-tunneling.
+func isTargetZone(name string) bool {
+	return name == "netflix.com." || strings.HasSuffix(name, ".netflix.com.")
+}
+
+// Handles requests with questions for records of type `A`.
+// Forwards the request to the specified nameservers and returns the
+// result to the caller to be sent back to the client. However, before
+// a reply is sent back, the IP addresses found within the response
+// packet are added to the routing table.
+func handleV4Hijack(w dns.ResponseWriter, req *dns.Msg) *dns.Msg {
+	// forward request to the specified nameservers
+
+	m := getServerReply(w, req)
+
+	// iterate through the answers in the reply and handle based on type
+
+	for _, ans := range m.Answer {
+		if ans.Header().Rrtype == dns.TypeA {
+			// add IP address to local list and then routing table
+
+			ip := ans.(*dns.A).A.String()
+			routedv4[ip] = struct{}{}
+
+			log.Print("Re-routing ", ip, " for ", ans.Header().Name, "/", dns.Type(ans.Header().Rrtype).String())
+
+			runAndLog(router, "add", ip + "/32", *gateway4)
+		} else if ans.Header().Rrtype == dns.TypeAAAA {
+			// sanity check for now, shouldn't happen afaik
+
+			log.Print("WARNING: AAAA response in ", ans.Header().Name, "/A")
+		}
+	}
+
+	return m
+}
+
+// Handles requests with questions for records of type `AAAA`.
+// If IPv6 routing is enabled, the request will undergo the same
+// treatment as `A` types in `handleV4Hijack()`; otherwise an empty
+// packet is sent back as a reply.
+func handleV6Hijack(w dns.ResponseWriter, req *dns.Msg) *dns.Msg {
+	var m *dns.Msg
+
+	// if an IPv6 gateway address was specified, AAAA records will be forwarded
+	// and processed; otherwise a fake reply is sent back telling the user agent
+	// that there are no IPv6 addresses present at this address
+
+	if routev6 {
+		// forward request to the specified nameservers
+
+		m = getServerReply(w, req)
+
+		// iterate through the answers in the reply and handle based on type
+
+		for _, ans := range m.Answer {
+			if ans.Header().Rrtype == dns.TypeAAAA {
+				// add IP address to local list and then routing table
+
+				ip := ans.(*dns.AAAA).AAAA.String()
+				routedv6[ip] = struct{}{}
+
+				log.Print("Re-routing ", ip, " for ", ans.Header().Name, "/", dns.Type(ans.Header().Rrtype).String())
+
+				runAndLog(router, "add", ip + "/128", *gateway6)
+			} else if ans.Header().Rrtype == dns.TypeA {
+				// sanity check for now, shouldn't happen afaik
+
+				log.Print("WARNING: A response in ", ans.Header().Name, "/AAAA")
+			}
+		}
+	} else {
+		if *verbose {
+			log.Print("Hijacking ", req.Question[0].Name, "/", dns.Type(req.Question[0].Qtype).String())
+		}
+
+		// create new empty reply packet with no errors indicated
+
+		// if `RCODE` is set to `NXDOMAIN` instead of the current empty packet method,
+		// some web browsers (e.g. Chrome) will display an error message stating
+		// `DNS_PROBE_FINISHED_NXDOMAIN`, even though a request for `A` records types is
+		// sent by the user agent and properly replied to (with addresses) by the server
+
+		m = getEmptyMsg(w, req, 0)
+	}
+
+	return m
+}
+
 // Handles an incoming DNS request packet. This function decides whether
 // the hostname listed in the DNS packet is worthy of manipulation, or
-// not. The IP addresses listed in the reply to the user for a marked
+// not. The IP addresses listed in the reply to the user for a target
 // hostname are added to the routing table at this time before a
 // reply is sent back to the user, otherwise the user agent of the client
 // might connect faster than the routing changes can be made.
 func handleRequest(w dns.ResponseWriter, req *dns.Msg) {
 	var m *dns.Msg
 
-	if len(req.Question) > 0 && (req.Question[0].Name == "netflix.com." || strings.HasSuffix(req.Question[0].Name, ".netflix.com.")) {
+	// check if the the hostname in the request matches the target
+
+	if len(req.Question) > 0 && isTargetZone(req.Question[0].Name) {
+		// handle `A` and `AAAA` types accordingly
+		// other record types will be forwarded without manipulation
+
 		if req.Question[0].Qtype == dns.TypeA {
-			m = getServerReply(w, req)
-			for _, ans := range m.Answer {
-				if ans.Header().Rrtype == dns.TypeA {
-					ip := ans.(*dns.A).A.String()
-					routedv4[ip] = struct{}{}
-
-					log.Print("Re-routing ", ip, " for ", ans.Header().Name, "/", dns.Type(ans.Header().Rrtype).String())
-
-					runAndLog(router, "add", ip + "/32", *gateway4)
-				} else if ans.Header().Rrtype == dns.TypeAAAA {
-					// sanity check for now, shouldn't happen afaik
-					log.Print("WARNING: AAAA response in ", ans.Header().Name, "/A")
-				}
-			}
+			m = handleV4Hijack(w, req)
 		} else if req.Question[0].Qtype == dns.TypeAAAA {
-			if routev6 {
-				m = getServerReply(w, req)
-				for _, ans := range m.Answer {
-					if ans.Header().Rrtype == dns.TypeAAAA {
-						ip := ans.(*dns.AAAA).AAAA.String()
-						routedv6[ip] = struct{}{}
-
-						log.Print("Re-routing ", ip, " for ", ans.Header().Name, "/", dns.Type(ans.Header().Rrtype).String())
-
-						runAndLog(router, "add", ip + "/128", *gateway6)
-					} else if ans.Header().Rrtype == dns.TypeA {
-						log.Print("WARNING: A response in ", ans.Header().Name, "/AAAA")
-					}
-				}
-			} else {
-				if *verbose {
-					log.Print("Hijacking ", req.Question[0].Name, "/", dns.Type(req.Question[0].Qtype).String())
-				}
-				m = getEmptyMsg(w, req, 0)
-			}
-		} else {
-			m = getServerReply(w, req)
+			m = handleV6Hijack(w, req)
 		}
-	} else {
+	}
+
+	// if no reply was previously set, forward it
+
+	if m == nil {
 		m = getServerReply(w, req)
 	}
+
+	// send reply back to user
 
 	w.WriteMsg(m)
 }
