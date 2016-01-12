@@ -18,8 +18,8 @@ ipconfig /flushdns | awk '!/(^\s*$|^Windows IP Configuration$)/{print $0}'
 
 if [[ -f openvpn_pid.txt ]]; then
 	echo Stopping OpenVPN...
-	
-	$SendCtrlC $(cat openvpn_pid.txt | tr -d '\r\n ')
+
+	${SendCtrlC} $(cat openvpn_pid.txt | tr -d '\r\n ')
 	rm -f openvpn_pid.txt
 fi
 
@@ -27,7 +27,7 @@ fi
 
 if [[ -f dnsserv_pid.txt ]]; then
 	echo Stopping DNS server...
-	
-	$SendCtrlC $(cat dnsserv_pid.txt | tr -d '\r\n ')
+
+	${SendCtrlC} $(cat dnsserv_pid.txt | tr -d '\r\n ')
 	rm -f dnsserv_pid.txt
 fi

@@ -21,7 +21,7 @@ rm -f openvpn_out.txt
 echo Waiting for gateway IP...
 
 vpn4=
-until [[ ! -z $vpn4 ]]; do
+until [[ ! -z ${vpn4} ]]; do
 	if [[ -f openvpn_out.txt ]]; then
 		vpn4=$(cat openvpn_out.txt | grep -Po '(?<=DHCP-serv: )[0-9\.]{4,}')
 	fi

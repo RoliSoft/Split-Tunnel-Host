@@ -10,8 +10,8 @@ fi
 
 if [[ -f openvpn_pid.txt ]]; then
 	echo Stopping OpenVPN...
-	
-	$SendCtrlC $(cat openvpn_pid.txt | tr -d '\r\n ')
+
+	${SendCtrlC} $(cat openvpn_pid.txt | tr -d '\r\n ')
 	rm -f openvpn_pid.txt
 fi
 
