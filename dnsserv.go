@@ -1,3 +1,7 @@
+// Copyright 2016 RoliSoft.  All rights reserved.
+// Use of this source code is governed by the MIT
+// license that can be found in the LICENSE file.
+
 package main
 
 import (
@@ -17,15 +21,15 @@ import (
 
 var (
 	nameservers []string
-	verbose     *bool
-	gateway4    *string
-	gateway6    *string
-	dnsr1       *string
-	dnsr2       *string
-	routev6     bool
-	router      string
-	routedv4    map[string]struct{}
-	routedv6    map[string]struct{}
+	verbose      *bool
+	gateway4     *string
+	gateway6     *string
+	dnsr1        *string
+	dnsr2        *string
+	routev6       bool
+	router        string
+	routedv4      map[string]struct{}
+	routedv6      map[string]struct{}
 )
 
 // Executes the specified command with the specified arguments. The
@@ -220,10 +224,14 @@ func handleRequest(w dns.ResponseWriter, req *dns.Msg) {
 		// handle `A` and `AAAA` types accordingly
 		// other record types will be forwarded without manipulation
 
-		if req.Question[0].Qtype == dns.TypeA {
+		switch req.Question[0].Qtype {
+
+		case dns.TypeA:
 			m = handleV4Hijack(w, req)
-		} else if req.Question[0].Qtype == dns.TypeAAAA {
+
+		case dns.TypeAAAA:
 			m = handleV6Hijack(w, req)
+
 		}
 	}
 
@@ -367,14 +375,14 @@ func main() {
 
 	// start listening for OS signals
 
-	sig := make(chan os.Signal)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	sigs := make(chan os.Signal)
 
-	for {
-		select {
-		case s := <-sig:
-			removeRoutes()
-			log.Fatalf("Received signal %d, exiting...", s)
-		}
-	}
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	// quit when SIGINT is received
+
+	sig := <- sigs
+
+	removeRoutes()
+	log.Fatalf("Received signal %d, exiting...", sig)
 }
