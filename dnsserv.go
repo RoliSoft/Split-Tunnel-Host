@@ -377,9 +377,9 @@ func main() {
 
 	sigs := make(chan os.Signal)
 
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
-	// quit when SIGINT is received
+	// quit when a signal is received
 
 	sig := <- sigs
 
