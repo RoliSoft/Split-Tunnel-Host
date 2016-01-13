@@ -10,7 +10,7 @@ fi
 
 if [[ ! -f dnsserv.exe ]]; then
 	echo Compiling DNS server...
-	go build dnsserv.go
+	go build -ldflags '-s' dnsserv.go
 
 	if [[ ! -f dnsserv.exe ]]; then
 		echo Failed to compile DNS server!; exit 1

@@ -69,7 +69,7 @@ Additionally, `go.exe` and `openvpn.exe` have to be in your `%PATH%`. The standa
 4. Fetch the dependencies and build the DNS server:
 
         go get github.com/miekg/dns
-        go build dnsserv.go
+        go build -ldflags '-s' dnsserv.go
 
 5. Run `run_dnsserv.sh us` (or any file name as the parameter from the `pia` folder) to start the VPN and the DNS server.
 6. When finished, run `kill_dnsserv.sh` to stop the perviously started servers and remove the routes. If not run, since the DNS configuration is set manually by the start script to `localhost`, you may not have DNS connectivity on the next Windows start. To fix this, just run `kill_dnsserv.sh`, as it will restore the network adapter to use the DNS settings specified by DHCP.
