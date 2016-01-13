@@ -17,6 +17,7 @@ import (
 	"syscall"
 
 	"github.com/miekg/dns"
+	"runtime"
 )
 
 var (
@@ -146,7 +147,11 @@ func handleV4Hijack(w dns.ResponseWriter, req *dns.Msg) *dns.Msg {
 
 			log.Print("Re-routing ", ip, " for ", ans.Header().Name, "/", dns.Type(ans.Header().Rrtype).String())
 
-			runAndLog(router, "add", ip + "/32", *gateway4)
+			if runtime.GOOS == "windows" {
+				runAndLog(router, "add", ip + "/32", *gateway4)
+			} else {
+				runAndLog(router, "add", ip + "/32", "gw", *gateway4)
+			}
 		} else if ans.Header().Rrtype == dns.TypeAAAA {
 			// sanity check for now, shouldn't happen afaik
 
@@ -184,7 +189,11 @@ func handleV6Hijack(w dns.ResponseWriter, req *dns.Msg) *dns.Msg {
 
 				log.Print("Re-routing ", ip, " for ", ans.Header().Name, "/", dns.Type(ans.Header().Rrtype).String())
 
-				runAndLog(router, "add", ip + "/128", *gateway6)
+				if runtime.GOOS == "windows" {
+					runAndLog(router, "add", ip + "/128", *gateway6)
+				} else {
+					runAndLog(router, "add", ip + "/128", "gw", *gateway6)
+				}
 			} else if ans.Header().Rrtype == dns.TypeA {
 				// sanity check for now, shouldn't happen afaik
 
@@ -246,8 +255,8 @@ func handleRequest(w dns.ResponseWriter, req *dns.Msg) {
 	w.WriteMsg(m)
 }
 
-// Removes the routed from the Windows Routing Table that have been
-// added durin the lifetime of the server. Failure to call this function
+// Removes the routes from the operating system's routing table that have been
+// added during the lifetime of the server. Failure to call this function
 // during exit may result in the inaccessibility of the added IP addresses.
 func removeRoutes() {
 	// remove IPv4 routes
@@ -256,7 +265,11 @@ func removeRoutes() {
 		log.Print("Removing routes...")
 
 		for ip, _ := range routedv4 {
-			runAndLog(router, "delete", ip + "/32")
+			if runtime.GOOS == "windows" {
+				runAndLog(router, "delete", ip + "/32")
+			} else {
+				runAndLog(router, "del", ip + "/32")
+			}
 		}
 	}
 
@@ -266,7 +279,11 @@ func removeRoutes() {
 		log.Print("Removing IPv6 routes...")
 
 		for ip, _ := range routedv6 {
-			runAndLog(router, "delete", ip + "/128")
+			if runtime.GOOS == "windows" {
+				runAndLog(router, "delete", ip + "/128")
+			} else {
+				runAndLog(router, "del", ip + "/128")
+			}
 		}
 	}
 }

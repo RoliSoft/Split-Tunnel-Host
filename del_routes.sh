@@ -1,9 +1,15 @@
 #!/bin/bash
 
-if [ $(uname -m) == "x86_64" ]; then
-	SendCtrlC="./SendCtrlC64"
+os=$(uname -o)
+
+if [[ ${os} == "Cygwin" ]]; then
+	if [ $(uname -m) == "x86_64" ]; then
+		SendCtrlC="./SendCtrlC64"
+	else
+		SendCtrlC="./SendCtrlC"
+	fi
 else
-	SendCtrlC="./SendCtrlC"
+	SendCtrlC="kill -INT"
 fi
 
 # stop our OpenVPN instance, if running
@@ -20,7 +26,11 @@ fi
 echo Removing IPv4 addresses...
 
 while read cidr; do
-	route delete "$cidr"
+	if [[ ${os} == "Cygwin" ]]; then
+		route delete "$cidr"
+	else
+		route del "$cidr"
+	fi
 done <addrs_v4.txt
 
 # remove IPv6 address null-routes
@@ -28,5 +38,9 @@ done <addrs_v4.txt
 echo Removing IPv6 addresses...
 
 while read cidr; do
-	route delete "$cidr"
+	if [[ ${os} == "Cygwin" ]]; then
+		route delete "$cidr"
+	else
+		route del "$cidr"
+	fi
 done <addrs_v6.txt

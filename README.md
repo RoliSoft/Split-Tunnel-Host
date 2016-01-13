@@ -1,6 +1,6 @@
 # Host-based Split Tunneling
 
-The purpose of this project is to mess with the Windows routing table in order to tunnel specific 3rd-party hosts and services selectively to a VPN connection. It was born out of the need of me not wanting to route all of my Internet traffic through a commercial VPN just because of a single service.
+The purpose of this project is to mess with the Windows/Linux routing table in order to tunnel specific 3rd-party hosts and services selectively to a VPN connection. It was born out of the need of me not wanting to route all of my Internet traffic through a commercial VPN just because of a single service.
 
 # Method 1 -- Static Netblock Routing
 
@@ -12,7 +12,7 @@ See the [second method](#method-2----dynamic-per-ip-routing) for split-tunneling
 
 The `gen_addrs.sh` script looks up the A and AAAA records for the domains listed in `domains.txt`. This list of IPs is then looked up using whois, and the CIDR notation for the netblock they are in is stored in `addrs_v4.txt` and `addrs_v6.txt`, depending on their IP version.
 
-The `add_routes.sh` script starts OpenVPN with the specified configuration, waits until the connection succeeds and extracts the gateway IP. (In case of PIA, this is the same as the address of the DHCP server, so this address will be used instead, since it's readily available in the log. You may need to tweak this for other providers.) After this, the Windows routing table will be modified (using the `route` command) to route the previously extracted IP ranges through the VPN.
+The `add_routes.sh` script starts OpenVPN with the specified configuration, waits until the connection succeeds and extracts the gateway IP. (In case of PIA, this is the same as the address of the DHCP server, so this address will be used instead, since it's readily available in the log. You may need to tweak this for other providers.) After this, the operating system's routing table will be modified (using the `route` command) to route the previously extracted IP ranges through the VPN.
 
 Since most VPN providers don't support IPv6 at this time, the extracted IPv6 ranges will be null-routed. Windows does not support null-routing the same way Linux does, as such the addresses will instead be set up to be routed to the local gateway, where they will be dropped.
 
@@ -28,18 +28,20 @@ If you know the addresses or netblocks you want to tunnel, you can create and fi
 
 ## Dependencies
 
-Since these are Bash scripts, Cygwin is required to run them. The following extra Cygwin packages need to be installed: `whois`, `ipcalc`, `dig`, `gawk`.
+Since these are Bash scripts, running them on Windows requires Cygwin.
 
-Additionally, `openvpn.exe` has to be in your `%PATH%`. A Cygwin-specific distribution is not required, just run the standard Windows installer for the Community Edition.
+The following extra Linux or Cygwin packages need to be installed: `whois`, `ipcalc`, `dig`, `gawk`, `openvpn`.
+
+On Windows, `openvpn.exe` has to be in your `%PATH%`. A Cygwin-specific distribution is not required, just run the standard Windows installer for the Community Edition.
 
 ## Usage
 
 1. Create `login.conf` in the `pia` folder, with the first line being your username, and the second being the password.
 2. Fill the `domains.txt` file with the list of domains you would like to split-tunnel inclusively.
 3. Run `gen_addrs.sh` in order to generate `addrs_v4.txt` and `addrs_v6.txt` from `domains.txt` **OR** manually create `addrs_v4.txt` and `addrs_v6.txt` with IPv4 CIDR notations of the netblocks you want to route selectively, and IPv6 netblocks you want to null-route.
-4. Edit `add_routes.sh` and replace `Ethernet adapter Intel` with the name of your actual LAN adapter, as seen in `ipconfig`.
+4. Edit `add_routes.sh` and replace `Ethernet adapter Intel` or `eth0` (depending on the OS) with the name of your actual LAN adapter, as seen in `ipconfig` or `ifconfig`.
 5. Run `add_routes.sh us` (or any file name as the parameter from the `pia` folder) to start the VPN and add the routes.
-6. When finished, run `del_routes.sh` to stop the VPN and remove the routes. If not run, the routes will clear on the next Windows restart anyways, since they are intentionally not set as persistent.
+6. When finished, run `del_routes.sh` to stop the VPN and remove the routes. If not run, the routes will clear on the next system restart anyways, since they are intentionally not set as persistent.
 
 # Method 2 -- Dynamic Per-IP Routing
 
@@ -53,18 +55,20 @@ The `kill_dnsserv.sh` script stops the running OpenVPN and DNS server instances,
 
 The `dnsserv.go` file is the DNS server itself. It uses the [miekg/dns](http://github.com/miekg/dns) DNS library both to act as a server and a client for forwarding. The `handleRequest()` function decides the path to take for every DNS request, this is what you'll have to modify with the domains you want to split-tunnel dynamically. For requests of type `A`, every IP in the response will be added to the routing table to use the gateway IP specified in command line argument `-r`. This is automatically specified when started by the `run_dnsserv.sh` script. For requests of type `AAAA`, an empty response will be sent back, unless an IPv6 gateway address is specified via the argument `-r6`, in which case they will get the same treatment as records of type `A`. (Initially IPv6 hijacking was done with an `NXDOMAIN` error in the reply, but Chrome would then just show an error message stating `DNS_PROBE_FINISHED_NXDOMAIN`, even though it sent an `A` request which was then answered properly.) For domains not looked after in the function, the requests will be proxied to the actual nameservers and back without any tampering.
 
-The `SendCtrlC.exe` and `SendCtrlC64.exe` are used to gracefully end both the DNS server and OpenVPN by sending a Ctrl+C message to the processes. Windows does not implement signaling the way Linux does, so even though both apps handle `SIGINT`/Ctrl+C, `taskkill /im` or `/bin/kill -s INT -f` (in Cygwin) do not shut the processes down in a way which would trigger their signal handler. These binaries were compiled from a modified source of the [SendSignal](http://www.latenighthacking.com/projects/2003/sendsignal/) project, which originally sends a Ctrl+Break signal.
+The `SendCtrlC.exe` and `SendCtrlC64.exe` are used on Windows to gracefully end both the DNS server and OpenVPN by sending a Ctrl+C message to the processes. Windows does not implement signaling the way Linux does, so even though both apps handle `SIGINT`/Ctrl+C, `taskkill /im` or `/bin/kill -s INT -f` (in Cygwin) do not shut the processes down in a way which would trigger their signal handler. These binaries were compiled from a modified source of the [SendSignal](http://www.latenighthacking.com/projects/2003/sendsignal/) project, which originally sends a Ctrl+Break signal.
 
 ## Dependencies
 
-Since these are Bash scripts, Cygwin is required to run them. You will also need to install the `gawk` Cygwin package.
+Since these are Bash scripts, running them on Windows requires Cygwin.
 
-Additionally, `go.exe` and `openvpn.exe` have to be in your `%PATH%`. The standard Windows installers for both Golang and OpenVPN will work, no special Cygwin-specific build is required.
+The following extra Linux or Cygwin packages need to be installed: `gawk`, `openvpn`, `golang`.
+
+On Windows, both `go.exe` and `openvpn.exe` have to be in your `%PATH%`. The standard Windows installers for both Golang and OpenVPN will work, no special Cygwin-specific build is required.
 
 ## Usage
 
 1. Create `login.conf` in the `pia` folder, with the first line being your username, and the second being the password.
-2. Edit `run_dnsserv.sh` and `kill_dnsserv.sh` and replace the adapter name to yours in the `netsh` calls.
+2. On Windows, edit `run_dnsserv.sh` and `kill_dnsserv.sh` to replace the adapter name in the `netsh` calls to yours.
 3. Edit `dnsserv.go` and update the filtering logic in `isTargetZone()` as needed.
 4. Fetch the dependencies and build the DNS server:
 
@@ -72,4 +76,4 @@ Additionally, `go.exe` and `openvpn.exe` have to be in your `%PATH%`. The standa
         go build -ldflags '-s' dnsserv.go
 
 5. Run `run_dnsserv.sh us` (or any file name as the parameter from the `pia` folder) to start the VPN and the DNS server.
-6. When finished, run `kill_dnsserv.sh` to stop the perviously started servers and remove the routes. If not run, since the DNS configuration is set manually by the start script to `localhost`, you may not have DNS connectivity on the next Windows start. To fix this, just run `kill_dnsserv.sh`, as it will restore the network adapter to use the DNS settings specified by DHCP.
+6. When finished, run `kill_dnsserv.sh` to stop the perviously started servers and remove the routes. If not run, since the DNS configuration is set manually by the start script to `localhost`, you may not have DNS connectivity on the next system start. To fix this, just run `kill_dnsserv.sh`, as it will restore the network adapter to use the DNS settings specified by DHCP.

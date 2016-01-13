@@ -1,18 +1,26 @@
 #!/bin/bash
 
 if [[ $# -ne 1 ]]; then
-	echo usage: add_routes.sh cn; exit 1
+	echo usage: run_dnsserv.sh cn; exit 1
 fi
 
 if [[ ! -f "pia/$1.ovpn" ]]; then
 	echo "pia/$1.ovpn" does not exist; exit 1
 fi
 
-if [[ ! -f dnsserv.exe ]]; then
+os=$(uname -o)
+
+if [[ ${os} == "Cygwin" ]]; then
+	goapp="dnsserv.exe"
+else
+	goapp="dnsserv"
+fi
+
+if [[ ! -f ${goapp} ]]; then
 	echo Compiling DNS server...
 	go build -ldflags '-s' dnsserv.go
 
-	if [[ ! -f dnsserv.exe ]]; then
+	if [[ ! -f ${goapp} ]]; then
 		echo Failed to compile DNS server!; exit 1
 	fi
 fi
@@ -32,7 +40,11 @@ echo Waiting for gateway IP...
 vpn4=
 until [[ ! -z ${vpn4} ]]; do
 	if [[ -f openvpn_out.txt ]]; then
-		vpn4=$(cat openvpn_out.txt | grep -Po '(?<=DHCP-serv: )[0-9\.]{4,}')
+		if [[ ${os} == "Cygwin" ]]; then
+			vpn4=$(cat openvpn_out.txt | grep -Po '(?<=DHCP-serv: )[0-9\.]{4,}')
+		else
+			vpn4=$(cat openvpn_out.txt | grep -Po '(?<=[0-9\.]{7} peer )[0-9\.]{4,}')
+		fi
 	fi
 	sleep 1
 	if [[ ! -f openvpn_pid.txt ]]; then
@@ -53,7 +65,7 @@ echo "VPN IPv4 Address: $vpn4"
 echo Starting DNS server...
 
 rm -f dnsserv_out.txt
-./dnsserv -r "$vpn4" > dnsserv_out.txt 2>&1 &
+./${goapp} -r "$vpn4" > dnsserv_out.txt 2>&1 &
 echo $! > dnsserv_pid.txt
 
 sleep 1
@@ -62,6 +74,16 @@ sleep 1
 
 echo Switching to DNS server...
 
-netsh interface ipv4 set dnsserver "Intel" static 127.0.0.1 primary | awk '!/^\s*$/{print $0}'
-netsh interface ipv6 set dnsserver "Intel" static ::1 primary | awk '!/^\s*$/{print $0}'
-ipconfig /flushdns | awk '!/(^\s*$|^Windows IP Configuration$)/{print $0}'
+if [[ ${os} == "Cygwin" ]]; then
+	netsh interface ipv4 set dnsserver "Intel" static 127.0.0.1 primary | awk '!/^\s*$/{print $0}'
+	netsh interface ipv6 set dnsserver "Intel" static ::1 primary | awk '!/^\s*$/{print $0}'
+
+	ipconfig /flushdns | awk '!/(^\s*$|^Windows IP Configuration$)/{print $0}'
+else
+	cat /etc/resolv.conf > original_resolv.conf
+	echo "127.0.0.1" > /etc/resolv.conf
+
+	test -f /etc/init.d/nscd    && /etc/init.d/nscd    restart
+	test -f /etc/init.d/dnsmasq && /etc/init.d/dnsmasq restart
+	test -f /etc/init.d/named   && /etc/init.d/named   restart
+fi

@@ -42,9 +42,7 @@ cat addrs_v6_tmp.txt > addrs_v6.txt
 rm -f addrs_v4_tmp.txt
 rm -f addrs_v6_tmp.txt
 
-echo "94.125.179.8/32" >> addrs_v4.txt
-
-# remove duplicates since Windows will complain otherwise
+# remove duplicates since `route` will complain otherwise
 
 echo Deduplicating list...
 
