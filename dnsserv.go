@@ -264,7 +264,7 @@ func removeRoutes() {
 	if len(routedv4) > 0 {
 		log.Print("Removing routes...")
 
-		for ip, _ := range routedv4 {
+		for ip := range routedv4 {
 			if runtime.GOOS == "windows" {
 				runAndLog(router, "delete", ip + "/32")
 			} else {
@@ -278,7 +278,7 @@ func removeRoutes() {
 	if routev6 && len(routedv6) > 0 {
 		log.Print("Removing IPv6 routes...")
 
-		for ip, _ := range routedv6 {
+		for ip := range routedv6 {
 			if runtime.GOOS == "windows" {
 				runAndLog(router, "delete", ip + "/128")
 			} else {
@@ -309,7 +309,7 @@ func main() {
 
 	router, _ = exec.LookPath("route")
 	if len(router) < 1 {
-		log.Fatal("Unable to find the `route` command in your %PATH%.")
+		log.Fatal("Unable to find the `route` command in your PATH env var.")
 	}
 
 	// read gateway from arguments
@@ -401,5 +401,5 @@ func main() {
 	sig := <- sigs
 
 	removeRoutes()
-	log.Fatalf("Received signal %d, exiting...", sig)
+	log.Fatalf("Received signal %s, exiting...", sig.String())
 }
